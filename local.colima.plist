@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.colima</string>
+
+    <key>UserName</key>
+    <string>andy</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/colima</string>
+        <string>start</string>
+        <string>--cpu</string>
+        <string>4</string>
+        <string>--memory</string>
+        <string>6</string>
+        <string>--disk</string>
+        <string>100</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/andy/Library/Logs/colima-launchd.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/andy/Library/Logs/colima-launchd-error.log</string>
+</dict>
+</plist>

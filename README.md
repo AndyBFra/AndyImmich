@@ -26,8 +26,9 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 ## Setup (Stand jetzt)
 
 - Colima via `brew install colima docker docker-compose` installiert (Docker CLI + `docker-compose` Standalone-Binary; `docker compose` als Subcommand ist **nicht** verfügbar, daher `docker-compose` mit Bindestrich verwenden)
-- Colima-Autostart über LaunchAgent `~/Library/LaunchAgents/local.colima.plist` (läuft beim Login automatisch hoch, kein GUI-Prozess nötig — läuft daher auch headless zuverlässig), Ressourcen: 4 CPU / 6 GB RAM / 100 GB Disk
-- Container-Autostart über LaunchAgent `~/Library/LaunchAgents/local.immich.plist` → führt `start-immich.sh` aus, das wartet, bis Colimas Docker-Daemon bereit ist (max. 5 Min, Polling alle 5 Sek.), und dann `docker-compose up -d` ausführt
+- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`), Ressourcen: 4 CPU / 6 GB RAM / 100 GB Disk
+- Container-Autostart über System-LaunchDaemon `/Library/LaunchDaemons/local.immich.plist` (`UserName: andy`) → führt `start-immich.sh` aus, das wartet, bis Colimas Docker-Daemon bereit ist (max. 5 Min, Polling alle 5 Sek.), und dann `docker-compose up -d` ausführt
+- Beide laufen als **LaunchDaemons statt LaunchAgents**, damit sie unabhängig von einer eingeloggten GUI-Session laufen (auf einem headless Server kann die Konsolen-Session enden — z.B. nach einer Bildschirmfreigabe-Sitzung — wodurch `gui/<uid>`-LaunchAgents sterben; `system`-Domain-LaunchDaemons sind davon unabhängig, genau wie nginx bei PrivatPortfolio). Quelldateien liegen zur Referenz auch unter `~/Servers/Immich/local.colima.plist` / `local.immich.plist`; Installieren/Updates brauchen `sudo` (`sudo launchctl bootstrap system ...`).
 - `docker-compose.yml` + `.env` von der offiziellen Immich-Release-Seite geladen:
   ```bash
   curl -fsSL -o docker-compose.yml https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
@@ -50,7 +51,7 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 | Logs | `docker logs immich_server -f` (analog `immich_machine_learning`, `immich_postgres`, `immich_redis`) |
 | Update | Neue `docker-compose.yml`/`.env` von der Release-Seite laden (s.o.), Werte aus der alten `.env` übertragen, dann `docker-compose pull && docker-compose up -d` |
 
-**Neustart von Andyserver:** kompletter Autostart, kein manueller Schritt nötig — Colima und die Container starten beim Login automatisch (siehe LaunchAgents oben). Rechne mit 1-2 Minuten, bis Immich nach einem Neustart wieder erreichbar ist (VM-Boot + Container-Healthchecks).
+**Neustart von Andyserver:** kompletter Autostart beim Boot, kein manueller Schritt und kein Login nötig — die LaunchDaemons starten unabhängig von jeder GUI-Session (siehe oben). Rechne mit 1-2 Minuten, bis Immich nach einem Neustart wieder erreichbar ist (VM-Boot + Container-Healthchecks).
 
 ---
 
@@ -63,6 +64,7 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 | `~/Servers/Immich/docker-compose.yml` | Compose-Definition (von Immich vorgegeben, i.d.R. nicht anfassen) |
 | `~/Servers/Immich/.env` | Konfiguration + Secrets (DB-Passwort) — **nicht committen** |
 | `~/Servers/Immich/start-immich.sh` | Autostart-Wrapper, von `local.immich.plist` aufgerufen |
+| `~/Servers/Immich/local.colima.plist`, `local.immich.plist` | Referenzkopien der aktiven LaunchDaemons unter `/Library/LaunchDaemons/` |
 
 ---
 
