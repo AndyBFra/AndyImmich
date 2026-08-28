@@ -10,15 +10,17 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/colima</string>
-        <string>start</string>
-        <string>--cpu</string>
-        <string>4</string>
-        <string>--memory</string>
-        <string>6</string>
-        <string>--disk</string>
-        <string>100</string>
+        <string>/bin/bash</string>
+        <string>/Users/andy/Servers/Immich/start-colima.sh</string>
     </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/andy</string>
+    </dict>
 
     <key>RunAtLoad</key>
     <true/>

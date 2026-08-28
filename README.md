@@ -26,8 +26,8 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 ## Setup (Stand jetzt)
 
 - Colima via `brew install colima docker docker-compose` installiert (Docker CLI + `docker-compose` Standalone-Binary; `docker compose` als Subcommand ist **nicht** verfügbar, daher `docker-compose` mit Bindestrich verwenden)
-- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`), Ressourcen: 4 CPU / 6 GB RAM / 100 GB Disk
-- Container-Autostart über System-LaunchDaemon `/Library/LaunchDaemons/local.immich.plist` (`UserName: andy`) → führt `start-immich.sh` aus, das wartet, bis Colimas Docker-Daemon bereit ist (max. 5 Min, Polling alle 5 Sek.), und dann `docker-compose up -d` ausführt
+- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`) → führt `start-colima.sh` aus (Ressourcen: 4 CPU / 6 GB RAM / 100 GB Disk). Das Skript räumt vor `colima start` per `colima stop --force` **veralteten Laufzeit-Zustand** weg (`*.pid`/`*.sock` unter `~/.colima/_lima/colima/`), der nach einem unsauberen Shutdown — erzwungener Reboot durch macOS-Update, Stromausfall, Kernel-Panic — sonst `colima start` scheitern lässt (`error starting vm: exit status 1`); der Daemon hat kein Retry. **Hintergrund:** genau das ist am 2026-08-28 nach einem macOS-Update passiert — Immich kam nicht von selbst hoch.
+- Container-Autostart über System-LaunchDaemon `/Library/LaunchDaemons/local.immich.plist` (`UserName: andy`) → führt `start-immich.sh` aus: wartet ~60 Sek. auf Colimas Docker-Daemon; kommt der nicht, ruft es **`start-colima.sh` als Fallback** auf (Startreihenfolge der beiden Daemons ist damit egal), wartet nochmal bis zu 2 Min, und führt dann `docker-compose up -d` aus
 - Beide laufen als **LaunchDaemons statt LaunchAgents**, damit sie unabhängig von einer eingeloggten GUI-Session laufen (auf einem headless Server kann die Konsolen-Session enden — z.B. nach einer Bildschirmfreigabe-Sitzung — wodurch `gui/<uid>`-LaunchAgents sterben; `system`-Domain-LaunchDaemons sind davon unabhängig, genau wie nginx bei PrivatPortfolio). Quelldateien liegen zur Referenz auch unter `~/Servers/Immich/local.colima.plist` / `local.immich.plist`; Installieren/Updates brauchen `sudo` (`sudo launchctl bootstrap system ...`).
 - `docker-compose.yml` + `.env` von der offiziellen Immich-Release-Seite geladen:
   ```bash
@@ -50,6 +50,8 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 | Status | `docker ps` |
 | Logs | `docker logs immich_server -f` (analog `immich_machine_learning`, `immich_postgres`, `immich_redis`) |
 | Update | Neue `docker-compose.yml`/`.env` von der Release-Seite laden (s.o.), Werte aus der alten `.env` übertragen, dann `docker-compose pull && docker-compose up -d` |
+| Colima hängt / kommt nicht hoch | `bash ~/Servers/Immich/start-colima.sh` (macht `colima stop --force` + `colima start`); danach `bash ~/Servers/Immich/start-immich.sh` |
+| Startskripte neu installieren | nach Änderung an `local.colima.plist`: `sudo launchctl bootout system/local.colima; sudo cp ~/Servers/Immich/local.colima.plist /Library/LaunchDaemons/; sudo launchctl bootstrap system /Library/LaunchDaemons/local.colima.plist` (analog `local.immich`) |
 
 **Neustart von Andyserver:** kompletter Autostart beim Boot, kein manueller Schritt und kein Login nötig — die LaunchDaemons starten unabhängig von jeder GUI-Session (siehe oben). Rechne mit 1-2 Minuten, bis Immich nach einem Neustart wieder erreichbar ist (VM-Boot + Container-Healthchecks).
 
@@ -118,7 +120,8 @@ nach der Migration wieder löschen. Nicht ins Repo committen.
 | `~/Servers/Immich/postgres` | Datenbank |
 | `~/Servers/Immich/docker-compose.yml` | Compose-Definition (von Immich vorgegeben, i.d.R. nicht anfassen) |
 | `~/Servers/Immich/.env` | Konfiguration + Secrets (DB-Passwort) — **nicht committen** |
-| `~/Servers/Immich/start-immich.sh` | Autostart-Wrapper, von `local.immich.plist` aufgerufen |
+| `~/Servers/Immich/start-colima.sh` | startet Colima idempotent + räumt veralteten Zustand auf; von `local.colima.plist` und als Fallback von `start-immich.sh` aufgerufen |
+| `~/Servers/Immich/start-immich.sh` | wartet auf Docker (Fallback: `start-colima.sh`), dann `docker-compose up -d`; von `local.immich.plist` aufgerufen |
 | `~/Servers/Immich/local.colima.plist`, `local.immich.plist` | Referenzkopien der aktiven LaunchDaemons unter `/Library/LaunchDaemons/` |
 
 ---
