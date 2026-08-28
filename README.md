@@ -272,6 +272,35 @@ Immich ist damit „Betrachter/Organisierer", kein Datensilo.
 
 ---
 
+## Bekannte Eigenheiten
+
+### Speicheranzeige zeigt „57,1 TiB" statt ~229 GiB
+
+Das Dashboard (*Administration → Server-Statistik*) und `GET /api/server/storage` melden
+absurde Absolutwerte (z.B. `diskSize 57,1 TiB`, `diskUse 29,2 TiB` bei einer 256-GB-SSD).
+
+**Ursache:** Colima mountet den Host-Ordner per `virtiofs` in die VM. virtiofs meldet
+`statvfs()` mit `f_bsize = 1 MiB`, während die Blockzahlen in `f_frsize = 4 KiB` gezählt
+sind. Immich (bzw. Node.js `fs.statfs`, das nur `bsize` kennt, kein `frsize`) rechnet
+`Blöcke × bsize` → **Faktor 256 zu groß** (229 GiB × 256 ≈ 57 TiB).
+
+**Auswirkung: keine.**
+- `diskUsagePercentage` in der API ist **korrekt** (~51 %), nur die Absolutwerte sind Müll
+- `df -h` im Container zeigt richtig (`229G / 117G used`)
+- Uploads, Quotas (falls je gesetzt — Quotas laufen gegen real getrackte Bytes) unberührt
+
+**Fix in Sicht?** Eher nicht. Die falschen Werte kommen aus Apples
+Virtualization.framework-virtiofs; Immich kann es kaum umgehen, weil Node `fs.statfs`
+das nötige `f_frsize` gar nicht liefert. Kein bekannter Roadmap-Eintrag.
+
+**Workaround** (nur bei Bedarf): Colima `mountType` auf `sshfs` oder `9p` stellen
+(`~/.colima/default/colima.yaml` + `colima restart`). **Nicht empfohlen** — virtiofs ist
+deutlich schneller, und ein Fotoserver mit vielen Thumbnail-I/Os würde das spüren. Die
+externe SSD später zeigt denselben Effekt (kommt ebenfalls per virtiofs über `/Volumes/…`
+in die VM, da `vz` kein USB-Passthrough kann).
+
+---
+
 ## Sicherheit
 
 - `.env` enthält das DB-Passwort im Klartext — nicht ins Git-Repo committen (siehe `.gitignore`)
