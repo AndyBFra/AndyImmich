@@ -26,7 +26,7 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 ## Setup (Stand jetzt)
 
 - Colima via `brew install colima docker docker-compose` installiert (Docker CLI + `docker-compose` Standalone-Binary; `docker compose` als Subcommand ist **nicht** verfügbar, daher `docker-compose` mit Bindestrich verwenden)
-- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`) → führt `start-colima.sh` aus (Ressourcen: 4 CPU / 6 GB RAM / 100 GB Disk). Das Skript räumt vor `colima start` per `colima stop --force` **veralteten Laufzeit-Zustand** weg (`*.pid`/`*.sock` unter `~/.colima/_lima/colima/`), der nach einem unsauberen Shutdown — erzwungener Reboot durch macOS-Update, Stromausfall, Kernel-Panic — sonst `colima start` scheitern lässt (`error starting vm: exit status 1`); der Daemon hat kein Retry. **Hintergrund:** genau das ist am 2026-08-28 nach einem macOS-Update passiert — Immich kam nicht von selbst hoch.
+- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`) → führt `start-colima.sh` aus (Ressourcen: 4 CPU / 8 GB RAM / 100 GB Disk — Obergrenzen, siehe `start-colima.sh`). Das Skript räumt vor `colima start` per `colima stop --force` **veralteten Laufzeit-Zustand** weg (`*.pid`/`*.sock` unter `~/.colima/_lima/colima/`), der nach einem unsauberen Shutdown — erzwungener Reboot durch macOS-Update, Stromausfall, Kernel-Panic — sonst `colima start` scheitern lässt (`error starting vm: exit status 1`); der Daemon hat kein Retry. **Hintergrund:** genau das ist am 2026-08-28 nach einem macOS-Update passiert — Immich kam nicht von selbst hoch.
 - Container-Autostart über System-LaunchDaemon `/Library/LaunchDaemons/local.immich.plist` (`UserName: andy`) → führt `start-immich.sh` aus: wartet ~60 Sek. auf Colimas Docker-Daemon; kommt der nicht, ruft es **`start-colima.sh` als Fallback** auf (Startreihenfolge der beiden Daemons ist damit egal), wartet nochmal bis zu 2 Min, und führt dann `docker-compose up -d` aus
 - Beide laufen als **LaunchDaemons statt LaunchAgents**, damit sie unabhängig von einer eingeloggten GUI-Session laufen (auf einem headless Server kann die Konsolen-Session enden — z.B. nach einer Bildschirmfreigabe-Sitzung — wodurch `gui/<uid>`-LaunchAgents sterben; `system`-Domain-LaunchDaemons sind davon unabhängig, genau wie nginx bei PrivatPortfolio). Quelldateien liegen zur Referenz auch unter `~/Servers/Immich/local.colima.plist` / `local.immich.plist`; Installieren/Updates brauchen `sudo` (`sudo launchctl bootstrap system ...`).
 - `docker-compose.yml` + `.env` von der offiziellen Immich-Release-Seite geladen:
@@ -131,12 +131,8 @@ nach der Migration wieder löschen. Nicht ins Repo committen.
 - [x] **Docker-Compose-Autostart** nach Reboot — LaunchAgent `local.immich.plist` + `start-immich.sh`
 - [x] **Storage Template + Datenportabilität** — Template `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}` aktiv, Bestand migriert
 - [ ] **Bestands-Migration von der NAS** — bisher nur POC (Ordner 1992–2002, ~686 echte Fotos). Rest folgt, wenn die externe Platte da ist. Ablauf + `--ignore`-Filter siehe [Fotos importieren](#fotos-importieren-bestands-migration)
-- [ ] **HTTPS** via nginx + mkcert einrichten (analog zu PrivatPortfolio) — aktuell nur HTTP im LAN
 - [ ] **Library auf externe USB-C-/Thunderbolt-Platte** umziehen, sobald vorhanden — siehe [Externe Platte für die Library (geplant)](#externe-platte-für-die-library-geplant)
-- [ ] **DynDNS auf der FRITZ!Box** einrichten, falls Zugriff von unterwegs (z.B. automatisches Foto-Backup der Mobile-App außerhalb des Heimnetzes) gewünscht ist. Dafür zusätzlich nötig:
-  - Port-Weiterleitung bzw. Reverse-Proxy für den extern erreichbaren Port
-  - **Echtes** HTTPS-Zertifikat (Let's Encrypt via z.B. `certbot`) statt mkcert — mkcert-Zertifikate sind nur innerhalb des Heimnetzes vertrauenswürdig, da die Root-CA nur auf euren eigenen Geräten installiert ist
-  - Absicherung des dann öffentlich erreichbaren Diensts bedenken (starke Passwörter, ggf. 2FA in Immich aktivieren, Fail2ban o.ä. gegen Brute-Force)
+- [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
 
 ---
 
@@ -213,6 +209,95 @@ if ! mount | grep -q " ${LIBRARY_MOUNT} "; then
 fi
 ```
 (Analog sollte man beim Wiedereinstecken der Platte `docker-compose restart` fahren, falls die Container zwischenzeitlich ohne Mount liefen.)
+
+---
+
+## Öffentlicher Zugang (geplant)
+
+Ziel: Immich von unterwegs erreichbar ohne WireGuard (z.B. Mobile-Auto-Backup außerhalb
+des Heimnetzes). Weg: **nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS**.
+
+**Voraussetzungen (geprüft):** kein DS-Lite/CGNAT, FRITZ!Box kann DynDNS → machbar.
+nginx läuft bereits auf dem Mac (Homebrew-LaunchDaemon `homebrew.mxcl.nginx`, bedient schon
+PrivatPortfolio via `/opt/homebrew/etc/nginx/servers/portfolio.conf`).
+
+### Phase 1 — DynDNS / Domain
+
+- **Einfach/kostenlos:** FRITZ!Box → *Internet → MyFRITZ!-Konto* → `<hash>.myfritz.net`.
+  FRITZ!Box hält DNS (v4+v6) automatisch aktuell. Let's Encrypt stellt für `*.myfritz.net` aus.
+- **Alternativ:** eigene Domain (~12 €/Jahr) + FRITZ!Box → *Internet → Freigaben → DynDNS*
+  mit Update-URL des Registrars/Cloudflare. Erlaubt frei wählbare Subdomain wie `fotos.example.de`.
+- Feste interne IP für den Mac mini: FRITZ!Box → *Heimnetz → Netzwerk → [Mac] → „Immer die
+  gleiche IPv4-Adresse zuweisen"*.
+
+### Phase 2 — FRITZ!Box Portfreigaben
+
+*Internet → Freigaben → Portfreigaben*, Ziel Mac mini:
+
+| Extern | → Intern | Zweck |
+|---|---|---|
+| TCP **443** | :443 | HTTPS |
+| TCP **80** | :80 | Let's Encrypt HTTP-01 + HTTP→HTTPS-Redirect |
+
+Port **2283 nicht** freigeben. Bei aktivem IPv6 die Freigaben zusätzlich für die
+IPv6-Adresse des Mac setzen (FRITZ!Box trennt v4/v6).
+
+### Phase 3 — Reverse Proxy + TLS auf dem Mac
+
+```bash
+brew install certbot
+```
+
+Neuer Server-Block `/opt/homebrew/etc/nginx/servers/immich.conf`:
+
+- `server_name immich.<hash>.myfritz.net;` — **Achtung:** `portfolio.conf` hat aktuell
+  `server_name _;` (Catch-all auf 443). Beim zweiten HTTPS-Host beide auf echte Namen setzen
+  bzw. genau einen als `default_server` markieren.
+- Port 80: nur ACME-Webroot ausliefern, Rest `return 301 https://$host$request_uri;`
+- Port 443 `ssl`: `proxy_pass http://127.0.0.1:2283;` mit den Immich-Pflicht-Optionen:
+  - `client_max_body_size 0;` — große Videos
+  - `proxy_read_timeout 600s; proxy_send_timeout 600s;` — lange Uploads
+  - `proxy_http_version 1.1;` + `Upgrade`/`Connection`-Header — **WebSockets** (Live-Update)
+  - `proxy_buffering off;`
+  - `Host` / `X-Real-IP` / `X-Forwarded-For` / `X-Forwarded-Proto` (wie im portfolio-Block)
+
+Zertifikat (Port 80 muss von außen erreichbar sein):
+```bash
+certbot certonly --webroot -w <acme-webroot> -d immich.<hash>.myfritz.net
+# Cert unter /opt/homebrew/etc/letsencrypt/live/…
+```
+Auto-Renew per LaunchDaemon/cron, 1×/Tag: `certbot renew --quiet && /opt/homebrew/bin/nginx -s reload`
+
+Dann `nginx -t && nginx -s reload`.
+
+### Phase 4 — Immich konfigurieren
+
+- *Administration → Einstellungen → Server* → **Externe Domain** = `https://immich.<hash>.myfritz.net`
+- Test **von außen** (Mobilfunk): Login, großer Video-Upload, Live-Aktualisierung (WebSocket)
+- Mobile-App: öffentliche Server-URL (App wechselt pro Netzwerk zwischen intern/extern)
+
+### Phase 5 — Härtung (Pflicht, sobald öffentlich)
+
+- Immich: **Registrierung deaktivieren** (*Einstellungen → Authentifizierung*), **2FA** für
+  alle Konten, starke Passwörter, initiale `shouldChangePassword` erledigen
+- nginx: Rate-Limit auf `/api/auth/login` (`limit_req_zone` / `limit_req`)
+- Immich aktuell halten, Release-Notes auf Security-Fixes prüfen
+- Logs beobachten: `docker logs immich_server -f`, nginx `access.log`/`error.log`
+- Optional: GeoIP-Filter (nur DE) im nginx
+- Backups laufen weiter (`library/backups/`) + Library-Backup separat
+- Überlegung: WireGuard als Hauptzugang behalten, öffentlich nur das Nötige — kleinere
+  Angriffsfläche. FRITZ!Box kann WireGuard nativ für weitere Personen.
+
+### Alternativen ohne offenen Port
+
+| Weg | Vorteil | Haken |
+|---|---|---|
+| **Cloudflare Tunnel** (`cloudflared`) | kein Portforwarding/DynDNS, hinter CGNAT, TLS automatisch | Daten laufen über Cloudflare; **Free-Tier 100 MB Upload-Limit pro Request** → große Videos scheitern (bekanntes Immich-Problem) |
+| **Tailscale Funnel** | HTTPS-Endpoint ohne Portforwarding | über Tailscale-Relays, Durchsatzgrenzen |
+| **WireGuard behalten** | minimale Angriffsfläche | Nutzer brauchen Client/Profil |
+
+Da kein DS-Lite vorliegt und Immich große Uploads macht, ist der eigene Port + Let's Encrypt
+hier der sauberere Weg gegenüber den Tunneln.
 
 ---
 
