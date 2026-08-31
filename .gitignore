@@ -1,3 +1,4 @@
 .env
 library/
 postgres/
+.DS_Store

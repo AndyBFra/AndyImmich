@@ -17,4 +17,15 @@ fi
 
 echo "$(date '+%F %T') colima nicht aktiv - raeume veralteten Zustand auf und starte"
 colima stop --force >/dev/null 2>&1 || true
-exec colima start --cpu 4 --memory 6 --disk 100
+
+# Auf die externe Platte warten (Immich-Library liegt dort, wird per colima.yaml als
+# virtiofs-Mount in die VM gereicht). Colima notfalls trotzdem starten, damit andere
+# Container (Paperless) nicht blockiert werden - start-immich.sh gated separat hart.
+for i in $(seq 1 18); do
+    [ -f /Volumes/ServerData/pictures/.disk-present ] && break
+    sleep 5
+done
+[ -f /Volumes/ServerData/pictures/.disk-present ] || \
+    echo "$(date '+%F %T') WARN: externe Platte nicht bereit - starte Colima trotzdem"
+
+exec colima start --cpu 4 --memory 8 --disk 100

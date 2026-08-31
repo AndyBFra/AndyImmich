@@ -35,7 +35,7 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
   curl -fsSL -o .env https://github.com/immich-app/immich/releases/latest/download/example.env
   ```
 - `.env` angepasst gegenüber dem Default:
-  - `UPLOAD_LOCATION` und `DB_DATA_LOCATION` auf absolute Pfade gesetzt (`~/Servers/Immich/library`, `~/Servers/Immich/postgres`) statt relativ
+  - `UPLOAD_LOCATION` und `DB_DATA_LOCATION` auf absolute Pfade gesetzt statt relativ (inzwischen `UPLOAD_LOCATION=/Volumes/ServerData/pictures` auf externer SSD, `DB_DATA_LOCATION=~/Servers/Immich/postgres` intern — siehe [Externe Platte](#externe-platte-für-die-library))
   - `TZ=Europe/Berlin` gesetzt
   - `DB_PASSWORD` auf ein generiertes zufälliges Passwort geändert (Default war `postgres`)
 
@@ -110,14 +110,52 @@ nach der Migration wieder löschen. Nicht ins Repo committen.
 
 ---
 
+## Google Photos / Takeout-Import
+
+3× ~50 GB Google-Takeout-Archive, **mit Alben**. Die normale Immich-CLI kann keine
+Takeout-Alben → dafür **[`immich-go`](https://github.com/simulot/immich-go)**: liest die ZIPs
+direkt, wertet die `.json`-Sidecars aus (Aufnahmedatum, GPS, Beschreibung, Favorit, archiviert)
+und baut die **benannten Alben** nach.
+
+### Regeln
+
+- **Alle 3 ZIPs zusammen** in einem Aufruf — Google verteilt Fotos und Albuminhalte quer über
+  die Archive. Einzeln nacheinander = unvollständige Alben.
+- ZIPs **nicht entpacken**, immich-go liest sie direkt. Auf `/Volumes/ServerData/` ablegen (Platz).
+- Erst Trockenlauf, dann echter Import.
+- **Reihenfolge:** erst Google-Takeout (bringt Alben mit), dann NAS-Rest obendrauf, danach
+  Immichs Duplikat-Ansicht durchgehen (Google liefert oft neu komprimierte Dateien → Byte-Dups).
+
+### Ablauf
+
+```bash
+# Trockenlauf
+immich-go upload from-google-photos \
+  --server http://localhost:2283 --api-key <KEY> --dry-run \
+  /Volumes/ServerData/takeout-*.zip
+
+# Echter Import
+immich-go upload from-google-photos \
+  --server http://localhost:2283 --api-key <KEY> \
+  --include-archived --include-partner \
+  /Volumes/ServerData/takeout-*.zip
+```
+Vorher `immich-go upload from-google-photos --help` prüfen (Tool ändert sich oft). Stacking-Optionen
+für Live/Motion Photos und Doppelformate: `--manage-motion-photos`, `--manage-heic-jpeg`.
+
+**Nicht mitkommt:** Googles Gesichtsgruppen (Immich macht eigene), Freigaben.
+
+---
+
 ## Wichtige Pfade
 
 | Pfad | Inhalt |
 |---|---|
-| `~/Servers/Immich/library` | Originaldateien + Thumbnails (`UPLOAD_LOCATION`) — aktuell lokal auf Andyserver |
-| `~/Servers/Immich/library/library/admin/JAHR/JAHR-MM-TT/` | Originale mit echten Dateinamen (seit Storage Template aktiv, s.u.) |
-| `~/Servers/Immich/library/upload/` | nur noch Upload-Zwischenspeicher |
-| `~/Servers/Immich/postgres` | Datenbank |
+| `/Volumes/ServerData/pictures` | `UPLOAD_LOCATION` — externe SSD (siehe [Externe Platte](#externe-platte-für-die-library)) |
+| `/Volumes/ServerData/pictures/library/<user>/JAHR/JAHR-MM-TT/` | Originale mit echten Dateinamen (Storage Template, s.u.) |
+| `/Volumes/ServerData/pictures/upload/` | nur noch Upload-Zwischenspeicher |
+| `/Volumes/ServerData/pictures/backups/` | automatische Immich-DB-Dumps (nächtlich) |
+| `~/Servers/Immich/postgres` | Datenbank — **bleibt intern** |
 | `~/Servers/Immich/docker-compose.yml` | Compose-Definition (von Immich vorgegeben, i.d.R. nicht anfassen) |
 | `~/Servers/Immich/.env` | Konfiguration + Secrets (DB-Passwort) — **nicht committen** |
 | `~/Servers/Immich/start-colima.sh` | startet Colima idempotent + räumt veralteten Zustand auf; von `local.colima.plist` und als Fallback von `start-immich.sh` aufgerufen |
@@ -130,85 +168,76 @@ nach der Migration wieder löschen. Nicht ins Repo committen.
 
 - [x] **Docker-Compose-Autostart** nach Reboot — LaunchAgent `local.immich.plist` + `start-immich.sh`
 - [x] **Storage Template + Datenportabilität** — Template `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}` aktiv, Bestand migriert
-- [ ] **Bestands-Migration von der NAS** — bisher nur POC (Ordner 1992–2002, ~686 echte Fotos). Rest folgt, wenn die externe Platte da ist. Ablauf + `--ignore`-Filter siehe [Fotos importieren](#fotos-importieren-bestands-migration)
-- [ ] **Library auf externe USB-C-/Thunderbolt-Platte** umziehen, sobald vorhanden — siehe [Externe Platte für die Library (geplant)](#externe-platte-für-die-library-geplant)
+- [x] **Library auf externe SSD** umgezogen (2026-08-31) — `/Volumes/ServerData/pictures`, siehe [Externe Platte](#externe-platte-für-die-library)
+- [ ] **Bestands-Migration von der NAS** — POC gelaufen (1992–2002), Rest der NAS-Fotos steht noch aus. Ablauf + `--ignore`-Filter siehe [Fotos importieren](#fotos-importieren-bestands-migration)
+- [ ] **Google-Takeout-Import** (3× ~50 GB) mit `immich-go` unter Erhalt der Alben — siehe [Google Photos / Takeout](#google-photos--takeout-import)
+- [ ] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud).
 - [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
 
 ---
 
-## Externe Platte für die Library (geplant)
+## Externe Platte für die Library
 
-Sobald eine schnelle externe Platte am Server hängt, zieht **nur die Library** (Originale + Thumbnails, `UPLOAD_LOCATION`) auf die Platte um. **Die Postgres-Datenbank bleibt auf der internen SSD** (siehe unten, Begründung).
+**Umgezogen am 2026-08-31.** Die Library (Originale + Thumbnails + Encoded-Video + DB-Backups,
+`UPLOAD_LOCATION`) liegt auf einer externen USB-SSD. **Postgres bleibt auf der internen SSD.**
 
-### Hardware / Formatierung
-
-- **NVMe-SSD**, keine HDD — Immich macht viel Random-IO (Thumbnail-/Preview-Generierung, ML-Scan, Duplikat-Hashing beim Import)
-- Anschluss: Thunderbolt oder USB4, mindestens USB 3.2 Gen 2 (10 Gbit/s)
-- Größe: 1–2 TB (Bestand ~85 GB nach RAW-Filter + Thumbnails/Encoded-Video + Wachstum)
-- **APFS** formatieren (macOS-nativ). Kein exFAT/NTFS — dort fehlen POSIX-Rechte/Symlinks, das bricht Immichs Storage-Handling
-- Fester Mountpoint, hier als Beispiel `/Volumes/ImmichData` (APFS-Volume so benennen)
-- Disk-Sleep abschalten, sonst hängt der Server bei jedem Zugriff kurz:
-  ```bash
-  sudo pmset -a disksleep 0
-  ```
+| | |
+|---|---|
+| Platte | Crucial X9 2 TB (USB 3.2 Gen 2 SSD), APFS case-insensitive, Volume **`ServerData`** |
+| Mountpoint | `/Volumes/ServerData` |
+| `UPLOAD_LOCATION` | `/Volumes/ServerData/pictures` (Immich legt darunter `library/`, `thumbs/`, `encoded-video/`, `upload/`, `backups/`, `profile/` an) |
+| `DB_DATA_LOCATION` | unverändert `~/Servers/Immich/postgres` (intern) |
+| Sentinel | `/Volumes/ServerData/pictures/.disk-present` — von `start-colima.sh` / `start-immich.sh` geprüft |
 
 ### Warum bleibt Postgres intern?
 
-- Immich-Doku sagt explizit: DB **nicht** auf Netzlaufwerken, und eine extern angesteckte Platte hat dasselbe Risiko — wird sie im Betrieb getrennt oder schläft ein, korrumpiert die laufende Postgres-Instanz
-- Postgres braucht latenzarme `fsync`-Writes; das interne SSD ist dafür besser als USB
-- Die DB ist klein (Metadaten, keine Bilddaten) — sie belegt kaum Platz auf der internen SSD
-- `DB_DATA_LOCATION` bleibt also unverändert auf `~/Servers/Immich/postgres`
+- Immich-Doku: DB **nicht** auf Netzlaufwerken — eine extern angesteckte Platte hat dasselbe
+  Risiko: wird sie im Betrieb getrennt oder schläft ein, korrumpiert die laufende Postgres-Instanz
+- Postgres braucht latenzarme `fsync`-Writes; interne SSD ist dafür besser als USB
+- Die DB ist klein (Metadaten, keine Bilddaten)
 
-### Schritte für den Umzug
+### ⚠️ Colima `mounts:` ersetzt den `$HOME`-Default — nicht ergänzen!
 
-1. Platte als APFS formatieren, Volume `ImmichData` nennen, `sudo pmset -a disksleep 0`
-2. Container stoppen:
-   ```bash
-   cd ~/Servers/Immich && docker-compose down
-   ```
-3. Library rüberkopieren (Rechte/Struktur erhalten):
-   ```bash
-   mkdir -p /Volumes/ImmichData/immich/library
-   rsync -aP ~/Servers/Immich/library/ /Volumes/ImmichData/immich/library/
-   ```
-4. In **`.env`** anpassen (nur diese eine Zeile):
-   ```ini
-   UPLOAD_LOCATION=/Volumes/ImmichData/immich/library
-   # DB_DATA_LOCATION bleibt ~/Servers/Immich/postgres
-   ```
-5. **Colima die Platte durchreichen** — `/Volumes/...` wird *nicht* automatisch in die VM gemountet (nur `/Users/andy`). In `~/.colima/default/colima.yaml`:
-   ```yaml
-   mounts:
-     - location: /Volumes/ImmichData
-       writable: true
-   ```
-   Danach `colima restart` (übernimmt Mounts neu; kurze Downtime).
-6. Container starten, prüfen, dass neue Uploads auf der Platte landen:
-   ```bash
-   docker-compose up -d
-   # Testfoto hochladen, dann:
-   ls /Volumes/ImmichData/immich/library/upload/
-   ```
-7. Wenn alles läuft: altes `~/Servers/Immich/library/` löschen (vorher einmal Backup ziehen)
+**Die Falle beim Umzug (einmal reingefallen):** Sobald in `~/.colima/default/colima.yaml`
+ein `mounts:`-Block steht, mountet Colima `$HOME` (`/Users/andy`) **nicht mehr automatisch**.
+Trägt man dort nur die externe Platte ein, verschwindet `/Users/andy` aus der VM → der
+Postgres-Bind-Mount (`~/Servers/Immich/postgres`) zeigt ins Leere → Postgres legt eine
+**frische leere DB** an, Immich meldet „0 Assets". (Die echte DB bleibt unangetastet auf dem
+Host — Fix: `/Users/andy` mit eintragen, `colima restart`, Container neu.)
 
-### Start-Absicherung (wichtig)
-
-Wenn die Platte beim Boot **nicht** gemountet ist und die Container trotzdem starten, schreibt Immich in ein leeres Verzeichnis auf der internen SSD und „verliert" scheinbar alle Bilder (die Originale sind noch da, aber die DB zeigt auf den falschen, leeren Pfad).
-
-Daher muss `start-immich.sh` vor `docker-compose up -d` prüfen, dass der Mount wirklich da ist:
-```sh
-# in start-immich.sh, vor 'docker-compose up -d':
-LIBRARY_MOUNT="/Volumes/ImmichData"
-for i in $(seq 1 30); do
-    mount | grep -q " ${LIBRARY_MOUNT} " && break
-    sleep 5
-done
-if ! mount | grep -q " ${LIBRARY_MOUNT} "; then
-    echo "$(date): ${LIBRARY_MOUNT} nicht gemountet — Immich wird NICHT gestartet" >&2
-    exit 1
-fi
+Korrekte `colima.yaml`:
+```yaml
+mountType: virtiofs
+mounts:
+  - location: /Users/andy
+    writable: true
+  - location: /Volumes/ServerData
+    writable: true
 ```
-(Analog sollte man beim Wiedereinstecken der Platte `docker-compose restart` fahren, falls die Container zwischenzeitlich ohne Mount liefen.)
+
+### Start-Absicherung
+
+Wenn die Platte beim Boot **nicht** gemountet ist und die Container trotzdem starten, schreibt
+Immich in ein leeres Verzeichnis → scheinbarer Totalverlust. Deshalb:
+
+- **`start-colima.sh`** wartet bis ~90 s auf `.../pictures/.disk-present`, startet Colima
+  danach notfalls trotzdem (damit Paperless nicht blockiert wird)
+- **`start-immich.sh`** startet Immich **hart nicht**, wenn `.disk-present` am Host fehlt; ist
+  die Platte am Host aber nicht in der VM sichtbar (Colima startete zu früh), macht es einmal
+  `colima restart`
+
+### Kür für den Umzug (falls nochmal nötig)
+
+1. Platte als APFS formatieren: `diskutil eraseDisk APFS ServerData GPT /dev/diskN`, `sudo pmset -a disksleep 0`
+2. `mkdir -p /Volumes/ServerData/pictures`
+3. `cd ~/Servers/Immich && docker-compose down`
+4. `rsync -aH ~/Servers/Immich/library/ /Volumes/ServerData/pictures/`
+5. Sentinel: `date > /Volumes/ServerData/pictures/.disk-present`
+6. `.env`: `UPLOAD_LOCATION=/Volumes/ServerData/pictures`
+7. `colima.yaml`: **beide** Mounts (s.o.), dann `colima restart`
+8. Prüfen: `colima ssh -- ls /Users/andy/Servers/Immich/postgres/PG_VERSION` **und** `.../pictures`
+9. `docker-compose up -d`, in der DB `select count(*) from asset;` gegenprüfen
+10. altes `~/Servers/Immich/library/` löschen
 
 ---
 
