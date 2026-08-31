@@ -26,7 +26,7 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 ## Setup (Stand jetzt)
 
 - Colima via `brew install colima docker docker-compose` installiert (Docker CLI + `docker-compose` Standalone-Binary; `docker compose` als Subcommand ist **nicht** verfügbar, daher `docker-compose` mit Bindestrich verwenden)
-- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`) → führt `start-colima.sh` aus (Ressourcen: 4 CPU / 8 GB RAM / 100 GB Disk — Obergrenzen, siehe `start-colima.sh`). Das Skript räumt vor `colima start` per `colima stop --force` **veralteten Laufzeit-Zustand** weg (`*.pid`/`*.sock` unter `~/.colima/_lima/colima/`), der nach einem unsauberen Shutdown — erzwungener Reboot durch macOS-Update, Stromausfall, Kernel-Panic — sonst `colima start` scheitern lässt (`error starting vm: exit status 1`); der Daemon hat kein Retry. **Hintergrund:** genau das ist am 2026-08-28 nach einem macOS-Update passiert — Immich kam nicht von selbst hoch.
+- Colima-Autostart über System-`launchd`-**LaunchDaemon** `/Library/LaunchDaemons/local.colima.plist` (`UserName: andy`) → führt `start-colima.sh` aus (Ressourcen: **8 CPU / 12 GB RAM** / 100 GB Disk — Obergrenzen, siehe `start-colima.sh`; M4 mini hat 10 Kerne / 16 GB. War anfangs 4/8, für den Google-Import hochgesetzt). Das Skript räumt vor `colima start` per `colima stop --force` **veralteten Laufzeit-Zustand** weg (`*.pid`/`*.sock` unter `~/.colima/_lima/colima/`), der nach einem unsauberen Shutdown — erzwungener Reboot durch macOS-Update, Stromausfall, Kernel-Panic — sonst `colima start` scheitern lässt (`error starting vm: exit status 1`); der Daemon hat kein Retry. **Hintergrund:** genau das ist am 2026-08-28 nach einem macOS-Update passiert — Immich kam nicht von selbst hoch.
 - Container-Autostart über System-LaunchDaemon `/Library/LaunchDaemons/local.immich.plist` (`UserName: andy`) → führt `start-immich.sh` aus: wartet ~60 Sek. auf Colimas Docker-Daemon; kommt der nicht, ruft es **`start-colima.sh` als Fallback** auf (Startreihenfolge der beiden Daemons ist damit egal), wartet nochmal bis zu 2 Min, und führt dann `docker-compose up -d` aus
 - Beide laufen als **LaunchDaemons statt LaunchAgents**, damit sie unabhängig von einer eingeloggten GUI-Session laufen (auf einem headless Server kann die Konsolen-Session enden — z.B. nach einer Bildschirmfreigabe-Sitzung — wodurch `gui/<uid>`-LaunchAgents sterben; `system`-Domain-LaunchDaemons sind davon unabhängig, genau wie nginx bei PrivatPortfolio). Quelldateien liegen zur Referenz auch unter `~/Servers/Immich/local.colima.plist` / `local.immich.plist`; Installieren/Updates brauchen `sudo` (`sudo launchctl bootstrap system ...`).
 - `docker-compose.yml` + `.env` von der offiziellen Immich-Release-Seite geladen:
@@ -112,36 +112,68 @@ nach der Migration wieder löschen. Nicht ins Repo committen.
 
 ## Google Photos / Takeout-Import
 
-3× ~50 GB Google-Takeout-Archive, **mit Alben**. Die normale Immich-CLI kann keine
-Takeout-Alben → dafür **[`immich-go`](https://github.com/simulot/immich-go)**: liest die ZIPs
-direkt, wertet die `.json`-Sidecars aus (Aufnahmedatum, GPS, Beschreibung, Favorit, archiviert)
-und baut die **benannten Alben** nach.
+Google-Takeout-Archive **mit Alben** importieren. Die normale Immich-CLI kann keine
+Takeout-Alben → **[`immich-go`](https://github.com/simulot/immich-go)** (v0.32): liest die ZIPs
+direkt, wertet die `.json`-Sidecars aus (Datum, GPS, Beschreibung, Favorit, archiviert), baut
+die **benannten Alben** nach, stapelt Live/Motion Photos.
+
+**Status:** andys Konto importiert 2026-08-31 (5.265 → 55.338 Assets, 4 → 317 Alben).
+Steffi + Lilly stehen noch aus — **jeweils API-Key aus deren eigenem Konto** (immich-go lädt
+immer ins Konto des `--api-key`-Besitzers).
 
 ### Regeln
 
-- **Alle 3 ZIPs zusammen** in einem Aufruf — Google verteilt Fotos und Albuminhalte quer über
-  die Archive. Einzeln nacheinander = unvollständige Alben.
-- ZIPs **nicht entpacken**, immich-go liest sie direkt. Auf `/Volumes/ServerData/` ablegen (Platz).
-- Erst Trockenlauf, dann echter Import.
-- **Reihenfolge:** erst Google-Takeout (bringt Alben mit), dann NAS-Rest obendrauf, danach
-  Immichs Duplikat-Ansicht durchgehen (Google liefert oft neu komprimierte Dateien → Byte-Dups).
+- **Alle ZIPs eines Takeouts zusammen** in einem Aufruf — Google verteilt Fotos und Alben quer
+  über die Archive. Einzeln = unvollständige Alben.
+- ZIPs **nicht entpacken**. Auf `/Volumes/ServerData/transfer/` ablegen.
+- Erst `--dry-run` (zeigt Alben-/Fotozahl), dann echt.
+- **Reihenfolge:** erst Google-Takeout (bringt Alben), dann NAS-Rest, dann Duplikat-Ansicht.
+
+### ⚠️ Lehren aus dem 1. Lauf (kostete Stunden)
+
+1. **`--admin-api-key` zwingend mitgeben.** `--pause-immich-jobs` ist zwar Default-`true`, greift
+   aber nur mit einem *separaten* Admin-Key (kann derselbe sein, wenn der User Admin ist). Ohne
+   ihn laufen 24 parallele Uploads (`--concurrent-tasks` Default!) ungebremst → die VM
+   kollabiert (Load 17, Server-Timeouts), nur ~40 % kommen an, Rest „pending".
+2. **`--concurrent-tasks=6`** — der Flaschenhals ist Immichs Ingest, nicht das Netz.
+3. immich-go ist **resumierbar** (Hash-Dedup) — nach Abbruch einfach nochmal mit obigen Flags.
+4. immich-go gibt am Ende **alle** Job-Queues frei — auch manuell pausierte. Nach „Upload
+   completed" die ML-Queues sofort wieder pausieren (s.u.).
 
 ### Ablauf
+
+Läuft am schnellsten **vom Mac Studio über eine Thunderbolt-Bridge** (beide Macs sonst im WLAN;
+mini per TB-IP `http://10.10.10.1:2283` erreichbar). immich-go ist ein einzelnes Binary
+(`brew install immich-go` oder Release von GitHub, `Darwin_arm64`).
 
 ```bash
 # Trockenlauf
 immich-go upload from-google-photos \
-  --server http://localhost:2283 --api-key <KEY> --dry-run \
-  /Volumes/ServerData/takeout-*.zip
+  --server=http://10.10.10.1:2283 --api-key=<KEY> --dry-run \
+  takeout-*.zip
 
-# Echter Import
+# Echt
 immich-go upload from-google-photos \
-  --server http://localhost:2283 --api-key <KEY> \
-  --include-archived --include-partner \
-  /Volumes/ServerData/takeout-*.zip
+  --server=http://10.10.10.1:2283 \
+  --api-key=<KEY> --admin-api-key=<ADMIN_KEY> \
+  --concurrent-tasks=6 --session-tag \
+  takeout-*.zip
 ```
-Vorher `immich-go upload from-google-photos --help` prüfen (Tool ändert sich oft). Stacking-Optionen
-für Live/Motion Photos und Doppelformate: `--manage-motion-photos`, `--manage-heic-jpeg`.
+
+### Server vorbereiten (bei großen Importen)
+
+- **Colima temporär hochdrehen** — steht in `start-colima.sh` auf `--cpu 8 --memory 12` (M4 mini
+  hat 10 Kerne / 16 GB). Job-Concurrency in Immich (*Administration → Einstellungen → Aufträge*)
+  auf metadata 10 / thumbnail 6.
+- **ML-Queues pausieren** während des Imports (der Python-ML-Prozess ist der größte CPU-Fresser):
+  ```bash
+  for q in smartSearch faceDetection facialRecognition ocr duplicateDetection; do
+    curl -s -X PUT "http://localhost:2283/api/jobs/$q" -H "x-api-key: <KEY>" \
+      -H 'content-type: application/json' -d '{"command":"pause"}'
+  done
+  ```
+  Nach dem Import: erst Metadaten+Thumbnails leerlaufen lassen, dann dieselben Queues mit
+  `{"command":"resume"}` — Gesichter/CLIP-Suche/OCR brauchen für ~68k Fotos 6–12 h.
 
 **Nicht mitkommt:** Googles Gesichtsgruppen (Immich macht eigene), Freigaben.
 
@@ -170,7 +202,9 @@ für Live/Motion Photos und Doppelformate: `--manage-motion-photos`, `--manage-h
 - [x] **Storage Template + Datenportabilität** — Template `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}` aktiv, Bestand migriert
 - [x] **Library auf externe SSD** umgezogen (2026-08-31) — `/Volumes/ServerData/pictures`, siehe [Externe Platte](#externe-platte-für-die-library)
 - [ ] **Bestands-Migration von der NAS** — POC gelaufen (1992–2002), Rest der NAS-Fotos steht noch aus. Ablauf + `--ignore`-Filter siehe [Fotos importieren](#fotos-importieren-bestands-migration)
-- [ ] **Google-Takeout-Import** (3× ~50 GB) mit `immich-go` unter Erhalt der Alben — siehe [Google Photos / Takeout](#google-photos--takeout-import)
+- [x] **Google-Takeout-Import andy** (2026-08-31) — 5.265 → 55.338 Assets, 317 Alben. Siehe [Google Photos / Takeout](#google-photos--takeout-import)
+- [ ] **Google-Takeout-Import Steffi + Lilly** — je eigener API-Key aus deren Konto
+- [ ] **Nach ML-Durchlauf: Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original)
 - [ ] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud).
 - [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
 
