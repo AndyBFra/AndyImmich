@@ -228,6 +228,38 @@ immich-go upload from-google-photos \
 
 **Nicht mitkommt:** Googles Gesichtsgruppen (Immich macht eigene), Freigaben.
 
+### ⚠️ Takeout enthält keine mit dir geteilten Fremdfotos
+
+Takeout exportiert **nur Fotos, die dir gehören** (selbst hochgeladen). Bilder, die andere mit
+dir geteilt haben — auch wenn du sie in **deine eigenen Alben** gelegt hast — bleiben im Konto
+des Uploaders und fehlen im Takeout. Bei andys Import betraf das ~30–40 Alben (teils viele
+Fotos pro Album).
+
+**Nacharbeit (album-weise, erhält die Gruppierung):**
+
+1. Zuerst prüfen: 2–3 betroffene Alben in Immich vs. Google Fotos vergleichen — nur wenige
+   Fehlende = Kosmetik, fast leere Alben = Aufwand lohnt.
+2. Google Fotos (Web) → Album öffnen → `⋯` → *Alle herunterladen* → ZIP je Album. Alle unter
+   **einen** Elternordner entpacken, **Ordnername = Albumname**:
+   `~/Downloads/gphotos-shared/<Albumname>/…`
+3. **Ein** immich-go-Lauf über den Elternordner (dedupt per Hash, gefahrlos wiederholbar,
+   nur die fehlenden Fremdfotos landen im jeweiligen Album):
+   ```bash
+   immich-go upload from-folder \
+     --server=http://10.10.10.1:2283 \
+     --api-key=<ANDY_KEY> --admin-api-key=<ANDY_KEY> \
+     --pause-immich-jobs=false --concurrent-tasks=4 --on-errors=continue \
+     --folder-as-album=folder --session-tag \
+     ~/Downloads/gphotos-shared/
+   ```
+4. Erst machen, wenn kein ML-Durchlauf läuft (keine zusätzliche Upload-Last).
+
+Zu viel Klickerei bei 40 Alben? `gphotos-cdp` (steuert Chrome per DevTools-Protokoll, lädt auch
+geteilte Inhalte) — ein Durchlauf statt 40, dafür fummeliger Setup.
+
+**Familien-Alternative:** Steffi/Lilly haben ihre Fotos schon in ihren eigenen Immich-Konten →
+in Immich ein **gemeinsames Album** anlegen statt die Fotos zu duplizieren.
+
 ---
 
 ## Wichtige Pfade
@@ -258,6 +290,7 @@ immich-go upload from-google-photos \
 - [x] **Google-Takeout-Import andy** (2026-08-31) — 5.265 → 55.338 Assets, 317 Alben. Siehe [Google Photos / Takeout](#google-photos--takeout-import)
 - [x] **Google-Takeout-Import Lilly** (2026-08-31) — 10.513 → 14.023 Assets
 - [ ] **Google-Takeout-Import Steffi** — läuft 2026-08-31
+- [ ] **Geteilte Fremdfotos nachholen** — ~30–40 andy-Alben, in denen Takeout die mit ihm geteilten Bilder Dritter ausgelassen hat. Album-weiser Download + immich-go, siehe [Takeout enthält keine Fremdfotos](#️-takeout-enthält-keine-mit-dir-geteilten-fremdfotos)
 - [ ] **Nach ML-Durchlauf: Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
 - [ ] **Nach allen Importen:** Import-Keys in Immich widerrufen + `import-api-keys.local.md` leeren; Colima ggf. von 8 CPU/12 GB zurückdrehen
 - [ ] **rsync-Backup auf die NAS** einrichten — Library (`/Volumes/ServerData/pictures/library/`) + DB-Dumps (`…/backups/`) regelmäßig per `rsync` auf die NAS spiegeln (bisher liegt alles nur auf der einen externen SSD).
