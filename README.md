@@ -108,6 +108,10 @@ verschoben werden. Also: nach jedem Import einmal **Papierkorb / Duplikate in Im
 Für die CLI einen API-Key anlegen (Immich → Profilbild → *Konto-Einstellungen* → *API-Schlüssel*),
 nach der Migration wieder löschen. Nicht ins Repo committen.
 
+Die aktuell aktiven Import-Keys (andy/Admin, Lilly, Steffi) liegen in
+**`import-api-keys.local.md`** – gitignored, nicht in Git. Nach Abschluss aller Importe
+dort löschen und in Immich widerrufen.
+
 ---
 
 ## Google Photos / Takeout-Import
