@@ -59,11 +59,49 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 
 ## Fotos importieren (Bestands-Migration)
 
-Alte Fotosammlung liegt auf der NAS: SMB-Share `//192.168.178.38/Data/Pictures/Andy_Pics`
-(D-Link DNS-325 „bormankserver", User `andy`). Die NAS ist zu langsam für eine dauerhafte
-externe Bibliothek — die Bilder werden **einmalig per CLI in Immichs eigene Ablage kopiert**.
+Alte Fotosammlung liegt auf der NAS: SMB-Share `//192.168.178.38/Data/Pictures/` mit je einem
+Ordner pro Person (`Andy_Pics`, `Steffi_Pics`, `Lilly_Pics`) — D-Link DNS-325 „bormankserver",
+User `andy`. Die NAS ist zu langsam für eine dauerhafte externe Bibliothek — die Bilder werden
+**einmalig in Immichs eigene Ablage kopiert**.
 
-### Ablauf
+### Ablauf (verwendet für die Voll-Migration 2026-08-31)
+
+**Mit immich-go `from-folder`**, ausgeführt **vom Mac Studio** (NAS dort nativ als `/Volumes/Data`
+gemountet, mini per Thunderbolt-Bridge `http://10.10.10.1:2283` erreichbar — schneller als die
+Colima-VM). `--api-key` bestimmt das Zielkonto, für jede Person deren eigener Key.
+
+```bash
+# 1. ML-Queues pausieren (auf dem mini) — sonst bricht der Upload unter Last ab:
+for q in smartSearch faceDetection facialRecognition ocr duplicateDetection; do
+  curl -s -X PUT -H "x-api-key: <ADMIN_KEY>" -H "Content-Type: application/json" \
+    -d '{"command":"pause"}' "http://localhost:2283/api/jobs/$q"
+done
+
+# 2. Trockenlauf, dann ohne --dry-run:
+immich-go upload from-folder \
+  --server=http://10.10.10.1:2283 \
+  --api-key=<PERSONEN_KEY> --admin-api-key=<ADMIN_KEY> \
+  --pause-immich-jobs=false \
+  --concurrent-tasks=4 --on-errors=continue --session-tag \
+  --exclude-extensions=.cr2,.CR2,.arw,.nef,.dng,.lrcat \
+  --dry-run \
+  "/Volumes/Data/Pictures/<Person>_Pics"
+
+# 3. Danach ML wieder resumen (erst Metadaten/Thumbnails leerlaufen lassen).
+```
+
+- `--on-errors=continue` **zwingend** — Default `stop` bricht beim ersten Timeout komplett ab.
+- `--pause-immich-jobs=false`, weil die ML manuell gesteuert wird (sonst gibt immich-go am Ende
+  *alle* Queues frei, auch die manuell pausierten).
+- immich-go ist resumierbar (Hash-Dedup) — nach Abbruch einfach nochmal.
+- `--exclude-extensions` filtert RAW. immich-go zieht (anders als die alte Immich-CLI) keine
+  `*.files/`-Thumbnail-Ordner mit. Trotzdem nach dem Import **Papierkorb / Duplikate prüfen**.
+- Läuft ein Personen-Import parallel zu einem anderen Import auf **dasselbe Konto**? Nicht machen
+  (doppeltes Hashing, Album-/Dedup-Logik kollidiert) — nacheinander.
+
+### Fallback: Immich-CLI-Container mit NAS-Mount in der Colima-VM
+
+Wenn der Studio nicht verfügbar ist. Langsamer, NAS-über-VM-CIFS ist fragiler.
 
 1. **NAS in der Colima-VM mounten** (die NAS kann nur SMB 2.0, Umlaute brauchen `iocharset=utf8`
    → einmalig `cifs-utils` + `linux-modules-extra-$(uname -r)` in der VM nachinstallieren):
@@ -121,17 +159,26 @@ Takeout-Alben → **[`immich-go`](https://github.com/simulot/immich-go)** (v0.32
 direkt, wertet die `.json`-Sidecars aus (Datum, GPS, Beschreibung, Favorit, archiviert), baut
 die **benannten Alben** nach, stapelt Live/Motion Photos.
 
-**Status:** andys Konto importiert 2026-08-31 (5.265 → 55.338 Assets, 4 → 317 Alben).
-Steffi + Lilly stehen noch aus — **jeweils API-Key aus deren eigenem Konto** (immich-go lädt
-immer ins Konto des `--api-key`-Besitzers).
+**Immer ins Konto des `--api-key`-Besitzers** — jeder Nutzer braucht einen eigenen Key aus
+seinem Konto (Keys: `import-api-keys.local.md`). `--admin-api-key` bleibt andys Admin-Key.
+
+**Status (alle 2026-08-31):**
+
+| Konto | vorher | nachher | Alben |
+|---|---|---|---|
+| andy | 5.265 | 55.338 | 4 → 317 |
+| Lilly | 10.513 | 14.023 | — |
+| Steffi | läuft | — | — |
 
 ### Regeln
 
 - **Alle ZIPs eines Takeouts zusammen** in einem Aufruf — Google verteilt Fotos und Alben quer
   über die Archive. Einzeln = unvollständige Alben.
-- ZIPs **nicht entpacken**. Auf `/Volumes/ServerData/transfer/` ablegen.
+- ZIPs **nicht entpacken**. Auf dem Mac Studio unter `~/Downloads/` lassen, Glob auf den
+  Takeout-Zeitstempel: `~/Downloads/takeout-<TS>-*.zip` (matcht nur diesen einen Takeout).
 - Erst `--dry-run` (zeigt Alben-/Fotozahl), dann echt.
 - **Reihenfolge:** erst Google-Takeout (bringt Alben), dann NAS-Rest, dann Duplikat-Ansicht.
+- Nicht zwei Importe gleichzeitig auf **dasselbe Konto**.
 
 ### ⚠️ Lehren aus dem 1. Lauf (kostete Stunden)
 
@@ -205,11 +252,16 @@ immich-go upload from-google-photos \
 - [x] **Docker-Compose-Autostart** nach Reboot — LaunchAgent `local.immich.plist` + `start-immich.sh`
 - [x] **Storage Template + Datenportabilität** — Template `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}` aktiv, Bestand migriert
 - [x] **Library auf externe SSD** umgezogen (2026-08-31) — `/Volumes/ServerData/pictures`, siehe [Externe Platte](#externe-platte-für-die-library)
-- [ ] **Bestands-Migration von der NAS** — POC gelaufen (1992–2002), Rest der NAS-Fotos steht noch aus. Ablauf + `--ignore`-Filter siehe [Fotos importieren](#fotos-importieren-bestands-migration)
+- [x] **NAS-Bestands-Migration andy** (2026-08-31) — `01_Pics` komplett per immich-go `from-folder`, ~55k → 67k Assets (RAW ausgeschlossen)
+- [x] **NAS-Bestands-Migration Steffi** (2026-08-31) — `Steffi_Pics`
+- [ ] **NAS-Bestands-Migration Lilly** — `Lilly_Pics` (analog, Lillys Key). Ablauf siehe [Fotos importieren](#fotos-importieren-bestands-migration)
 - [x] **Google-Takeout-Import andy** (2026-08-31) — 5.265 → 55.338 Assets, 317 Alben. Siehe [Google Photos / Takeout](#google-photos--takeout-import)
-- [ ] **Google-Takeout-Import Steffi + Lilly** — je eigener API-Key aus deren Konto
-- [ ] **Nach ML-Durchlauf: Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original)
-- [ ] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud).
+- [x] **Google-Takeout-Import Lilly** (2026-08-31) — 10.513 → 14.023 Assets
+- [ ] **Google-Takeout-Import Steffi** — läuft 2026-08-31
+- [ ] **Nach ML-Durchlauf: Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
+- [ ] **Nach allen Importen:** Import-Keys in Immich widerrufen + `import-api-keys.local.md` leeren; Colima ggf. von 8 CPU/12 GB zurückdrehen
+- [ ] **rsync-Backup auf die NAS** einrichten — Library (`/Volumes/ServerData/pictures/library/`) + DB-Dumps (`…/backups/`) regelmäßig per `rsync` auf die NAS spiegeln (bisher liegt alles nur auf der einen externen SSD).
+- [ ] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud) — deckt der rsync-Punkt oben mit ab.
 - [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
 
 ---
