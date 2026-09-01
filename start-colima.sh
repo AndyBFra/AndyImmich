@@ -28,4 +28,4 @@ done
 [ -f /Volumes/ServerData/pictures/.disk-present ] || \
     echo "$(date '+%F %T') WARN: externe Platte nicht bereit - starte Colima trotzdem"
 
-exec colima start --cpu 8 --memory 12 --disk 100
+exec colima start --cpu 6 --memory 8 --disk 100
