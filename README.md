@@ -286,13 +286,16 @@ in Immich ein **gemeinsames Album** anlegen statt die Fotos zu duplizieren.
 - [x] **Library auf externe SSD** umgezogen (2026-08-31) — `/Volumes/ServerData/pictures`, siehe [Externe Platte](#externe-platte-für-die-library)
 - [x] **NAS-Bestands-Migration andy** (2026-08-31) — `01_Pics` komplett per immich-go `from-folder`, ~55k → 67k Assets (RAW ausgeschlossen)
 - [x] **NAS-Bestands-Migration Steffi** (2026-08-31) — `Steffi_Pics`
-- [ ] **NAS-Bestands-Migration Lilly** — `Lilly_Pics` (analog, Lillys Key). Ablauf siehe [Fotos importieren](#fotos-importieren-bestands-migration)
+- [x] **NAS-Bestands-Migration Lilly** — `Lilly_Pics` (analog, Lillys Key). Ablauf siehe [Fotos importieren](#fotos-importieren-bestands-migration)
 - [x] **Google-Takeout-Import andy** (2026-08-31) — 5.265 → 55.338 Assets, 317 Alben. Siehe [Google Photos / Takeout](#google-photos--takeout-import)
 - [x] **Google-Takeout-Import Lilly** (2026-08-31) — 10.513 → 14.023 Assets
-- [ ] **Google-Takeout-Import Steffi** — läuft 2026-08-31
+- [x] **Google-Takeout-Import Steffi** (2026-08-31) — ~9,7k → 39,5k Assets
+- [x] **ML-Voll-Durchlauf** nach allen Importen (2026-09-01) — 121.935 Assets, 144.968 Gesichter, 5.140 Personen-Cluster; Job-Concurrency danach auf Normalwerte zurück
+- [x] **Colima zurückgedreht** (2026-09-01) — 8 CPU/12 GB → 6 CPU/8 GB (12 GB ließ macOS thrashen, Compressor ~7,7 GB), `start-colima.sh` + `colima.yaml`
 - [ ] **Geteilte Fremdfotos nachholen** — ~30–40 andy-Alben, in denen Takeout die mit ihm geteilten Bilder Dritter ausgelassen hat. Album-weiser Download + immich-go, siehe [Takeout enthält keine Fremdfotos](#️-takeout-enthält-keine-mit-dir-geteilten-fremdfotos)
-- [ ] **Nach ML-Durchlauf: Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
-- [ ] **Nach allen Importen:** Import-Keys in Immich widerrufen + `import-api-keys.local.md` leeren; Colima ggf. von 8 CPU/12 GB zurückdrehen
+- [ ] **Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
+- [ ] **Personen benennen** (Personen-Ansicht) — 5.140 Cluster, erst 29 benannt
+- [ ] **Import-Keys widerrufen** + `import-api-keys.local.md` leeren
 - [ ] **rsync-Backup auf die NAS** einrichten — Library (`/Volumes/ServerData/pictures/library/`) + DB-Dumps (`…/backups/`) regelmäßig per `rsync` auf die NAS spiegeln (bisher liegt alles nur auf der einen externen SSD).
 - [ ] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud) — deckt der rsync-Punkt oben mit ab.
 - [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
