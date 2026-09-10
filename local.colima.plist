@@ -25,6 +25,13 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Ohne dies scheitert 'diskutil mount' aus diesem Daemon-Kontext mit
+         "Could not switch to audit session ...: Operation not permitted"
+         (beobachtet 2026-09-05) - der Job hat sonst keine Security-Session,
+         die DiskArbitration fuer nutzersichtbare Mounts verlangt. -->
+    <key>SessionCreate</key>
+    <true/>
+
     <key>StandardOutPath</key>
     <string>/Users/andy/Library/Logs/colima-launchd.log</string>
 

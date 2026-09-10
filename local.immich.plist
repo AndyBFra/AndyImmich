@@ -17,6 +17,10 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- s. local.colima.plist: SessionCreate fuer diskutil-mount-Fallback -->
+    <key>SessionCreate</key>
+    <true/>
+
     <key>StandardOutPath</key>
     <string>/Users/andy/Library/Logs/immich-launchd.log</string>
 

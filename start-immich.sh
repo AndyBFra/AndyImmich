@@ -29,9 +29,13 @@ wait_for_docker() {
 DISK_SENTINEL="/Volumes/ServerData/pictures/.disk-present"
 COLIMA=/opt/homebrew/bin/colima
 
-# ~90 s auf die Platte warten (USB-Enumeration nach Boot kann dauern)
+# ~90 s auf die Platte warten. Root Cause (siehe reboot-2026-09-05.md): ohne Login
+# ist die FileVault-Data-Partition gesperrt (enthaelt auch dieses Skript) - das ist
+# keine LaunchDaemon/Session-Eigenheit, einfaches diskutil mount reicht, sobald
+# Data entsperrt ist (Login-Fenster oder Apples "Remote FileVault Unlock over SSH").
 for i in $(seq 1 18); do
     [ -f "$DISK_SENTINEL" ] && break
+    /usr/sbin/diskutil mount "ServerData" >/dev/null 2>&1
     sleep 5
 done
 if [ ! -f "$DISK_SENTINEL" ]; then

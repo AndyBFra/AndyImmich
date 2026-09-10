@@ -21,8 +21,17 @@ colima stop --force >/dev/null 2>&1 || true
 # Auf die externe Platte warten (Immich-Library liegt dort, wird per colima.yaml als
 # virtiofs-Mount in die VM gereicht). Colima notfalls trotzdem starten, damit andere
 # Container (Paperless) nicht blockiert werden - start-immich.sh gated separat hart.
+#
+# ROOT CAUSE (gefunden 2026-09-05, siehe reboot-2026-09-05.md): ohne Login ist die
+# FileVault-verschluesselte Data-Partition (enthaelt /Users/andy, also auch DIESES
+# Skript) beim Boot gesperrt - "diskutil mount" scheitert dann nicht wegen der
+# externen Platte, sondern weil ueberhaupt nichts Nutzerbezogenes laeuft, bis Data
+# entsperrt ist (Login-Fenster ODER Apples "Remote FileVault Unlock over SSH",
+# macOS 26). Kein LaunchDaemon-Trick kann das umgehen - einfache Retry-Schleife
+# reicht, sobald Data entsperrt ist, klappt normales diskutil mount sofort.
 for i in $(seq 1 18); do
     [ -f /Volumes/ServerData/pictures/.disk-present ] && break
+    /usr/sbin/diskutil mount "ServerData" >/dev/null 2>&1
     sleep 5
 done
 [ -f /Volumes/ServerData/pictures/.disk-present ] || \
