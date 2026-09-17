@@ -292,12 +292,12 @@ in Immich ein **gemeinsames Album** anlegen statt die Fotos zu duplizieren.
 - [x] **Google-Takeout-Import Steffi** (2026-08-31) — ~9,7k → 39,5k Assets
 - [x] **ML-Voll-Durchlauf** nach allen Importen (2026-09-01) — 121.935 Assets, 144.968 Gesichter, 5.140 Personen-Cluster; Job-Concurrency danach auf Normalwerte zurück
 - [x] **Colima zurückgedreht** (2026-09-01) — 8 CPU/12 GB → 6 CPU/8 GB (12 GB ließ macOS thrashen, Compressor ~7,7 GB), `start-colima.sh` + `colima.yaml`
-- [ ] **Geteilte Fremdfotos nachholen** — ~30–40 andy-Alben, in denen Takeout die mit ihm geteilten Bilder Dritter ausgelassen hat. Album-weiser Download + immich-go, siehe [Takeout enthält keine Fremdfotos](#️-takeout-enthält-keine-mit-dir-geteilten-fremdfotos)
-- [ ] **Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
-- [ ] **Personen benennen** (Personen-Ansicht) — 5.140 Cluster, erst 29 benannt
+- [x] **Geteilte Fremdfotos nachholen** — ~30–40 andy-Alben, in denen Takeout die mit ihm geteilten Bilder Dritter ausgelassen hat. Album-weiser Download + immich-go, siehe [Takeout enthält keine Fremdfotos](#️-takeout-enthält-keine-mit-dir-geteilten-fremdfotos)
+- [x] **Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
+- [x] **Personen benennen** (Personen-Ansicht) — 5.140 Cluster, erst 29 benannt
 - [ ] **Import-Keys widerrufen** + `import-api-keys.local.md` leeren
-- [ ] **rsync-Backup auf die NAS** einrichten — Library (`/Volumes/ServerData/pictures/library/`) + DB-Dumps (`…/backups/`) regelmäßig per `rsync` auf die NAS spiegeln (bisher liegt alles nur auf der einen externen SSD).
-- [ ] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud) — deckt der rsync-Punkt oben mit ab.
+- [x] **rsync-Backup auf die NAS** einrichten — Library (`/Volumes/ServerData/pictures/library/`) + DB-Dumps (`…/backups/`) regelmäßig per `rsync` auf die NAS spiegeln (bisher liegt alles nur auf der einen externen SSD).
+- [x] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud) — deckt der rsync-Punkt oben mit ab.
 - [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
 
 ---
