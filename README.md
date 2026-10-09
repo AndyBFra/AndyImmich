@@ -514,9 +514,14 @@ Immich ist damit „Betrachter/Organisierer", kein Datensilo.
 
 ## Bekannte Eigenheiten
 
-### Speicheranzeige zeigt „57,1 TiB" statt ~229 GiB
+### ✅ Behoben mit v3.3.0 (2026-10-09): Speicheranzeige zeigte „57,1 TiB" statt ~229 GiB
 
-Das Dashboard (*Administration → Server-Statistik*) und `GET /api/server/storage` melden
+Immichs „Storage Calculation Fix" in v3.3.0 behebt das Problem — `GET /api/server/storage`
+zeigt seitdem die korrekten Absolutwerte (verifiziert nach dem Update: `diskSize 1.8 TiB`,
+`diskUse 791.4 GiB`, deckt sich exakt mit `df -h`). Rest dieses Abschnitts als Referenz,
+falls es nach einem künftigen Update doch wieder auftaucht:
+
+Das Dashboard (*Administration → Server-Statistik*) und `GET /api/server/storage` meldeten
 absurde Absolutwerte (z.B. `diskSize 57,1 TiB`, `diskUse 29,2 TiB` bei einer 256-GB-SSD).
 
 **Ursache:** Colima mountet den Host-Ordner per `virtiofs` in die VM. virtiofs meldet
@@ -529,11 +534,7 @@ sind. Immich (bzw. Node.js `fs.statfs`, das nur `bsize` kennt, kein `frsize`) re
 - `df -h` im Container zeigt richtig (`229G / 117G used`)
 - Uploads, Quotas (falls je gesetzt — Quotas laufen gegen real getrackte Bytes) unberührt
 
-**Fix in Sicht?** Eher nicht. Die falschen Werte kommen aus Apples
-Virtualization.framework-virtiofs; Immich kann es kaum umgehen, weil Node `fs.statfs`
-das nötige `f_frsize` gar nicht liefert. Kein bekannter Roadmap-Eintrag.
-
-**Workaround** (nur bei Bedarf): Colima `mountType` auf `sshfs` oder `9p` stellen
+**Workaround** (nicht mehr nötig, nur als Referenz): Colima `mountType` auf `sshfs` oder `9p` stellen
 (`~/.colima/default/colima.yaml` + `colima restart`). **Nicht empfohlen** — virtiofs ist
 deutlich schneller, und ein Fotoserver mit vielen Thumbnail-I/Os würde das spüren. Die
 externe SSD später zeigt denselben Effekt (kommt ebenfalls per virtiofs über `/Volumes/…`
