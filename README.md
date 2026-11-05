@@ -49,7 +49,7 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 | Stoppen | `docker-compose down` |
 | Status | `docker ps` |
 | Logs | `docker logs immich_server -f` (analog `immich_machine_learning`, `immich_postgres`, `immich_redis`) |
-| Update (Minor/Patch, gleiche Major-Version) | 1. Breaking Changes der Release-Notes lesen. 2. `docker exec immich_postgres pg_dumpall -U postgres \| gzip > ~/immich-preupdate-$(date +%F).sql.gz` (Dump auf die **interne** Platte). 3. `docker-compose.yml` von der Release-Seite neu ziehen (ändert sich ab und zu minimal). 4. In `.env` `IMMICH_VERSION` auf die **exakte** Version pinnen (nicht `v3`). 5. `docker-compose pull && docker-compose up -d` — DB-Migrationen laufen automatisch, mit `docker logs immich_server -f` verfolgen. 6. `docker-compose.yml` committen. Rollback: `.env` zurück auf alte Version + `up -d`; Notfall: Dump zurückspielen. **Zuletzt: v3.1.0 → v3.2.0 am 2026-09-10.** |
+| Update (Minor/Patch, gleiche Major-Version) | 1. Breaking Changes der Release-Notes lesen. 2. `docker exec immich_postgres pg_dumpall -U postgres \| gzip > ~/immich-preupdate-$(date +%F).sql.gz` (Dump auf die **interne** Platte). 3. `docker-compose.yml` von der Release-Seite neu ziehen (ändert sich ab und zu minimal). 4. In `.env` `IMMICH_VERSION` auf die **exakte** Version pinnen (nicht `v3`). 5. `docker-compose pull && docker-compose up -d` — DB-Migrationen laufen automatisch, mit `docker logs immich_server -f` verfolgen. 6. `docker-compose.yml` committen. Rollback: `.env` zurück auf alte Version + `up -d`; Notfall: Dump zurückspielen. Aktuell installierte Version: `grep IMMICH_VERSION .env`. |
 | Colima hängt / kommt nicht hoch | `bash ~/Servers/Immich/start-colima.sh` (macht `colima stop --force` + `colima start`); danach `bash ~/Servers/Immich/start-immich.sh` |
 | Startskripte neu installieren | nach Änderung an `local.colima.plist`: `sudo launchctl bootout system/local.colima; sudo cp ~/Servers/Immich/local.colima.plist /Library/LaunchDaemons/; sudo launchctl bootstrap system /Library/LaunchDaemons/local.colima.plist` (analog `local.immich`) |
 
@@ -59,206 +59,13 @@ Aktuell nur im LAN erreichbar, kein HTTPS, kein Internet-Zugriff.
 
 ## Fotos importieren (Bestands-Migration)
 
-Alte Fotosammlung liegt auf der NAS: SMB-Share `//192.168.178.38/Data/Pictures/` mit je einem
-Ordner pro Person (`Andy_Pics`, `Steffi_Pics`, `Lilly_Pics`) — D-Link DNS-325 „bormankserver",
-User `andy`. Die NAS ist zu langsam für eine dauerhafte externe Bibliothek — die Bilder werden
-**einmalig in Immichs eigene Ablage kopiert**.
+Die einmalige Bestands-Migration (NAS-Altbestand per `immich-go from-folder` + Google-Takeout
+per `immich-go from-google-photos`, für alle drei Konten) ist abgeschlossen (2026-08-31/09-01).
+Ablauf, immich-go-Flags, Fallstricke und Lessons-Learned stehen in **[`import-notes.md`](import-notes.md)**
+— als Referenz für einen künftigen, ähnlichen Import (z.B. neues Familienkonto).
 
-### Ablauf (verwendet für die Voll-Migration 2026-08-31)
-
-**Mit immich-go `from-folder`**, ausgeführt **vom Mac Studio** (NAS dort nativ als `/Volumes/Data`
-gemountet, mini per Thunderbolt-Bridge `http://10.10.10.1:2283` erreichbar — schneller als die
-Colima-VM). `--api-key` bestimmt das Zielkonto, für jede Person deren eigener Key.
-
-```bash
-# 1. ML-Queues pausieren (auf dem mini) — sonst bricht der Upload unter Last ab:
-for q in smartSearch faceDetection facialRecognition ocr duplicateDetection; do
-  curl -s -X PUT -H "x-api-key: <ADMIN_KEY>" -H "Content-Type: application/json" \
-    -d '{"command":"pause"}' "http://localhost:2283/api/jobs/$q"
-done
-
-# 2. Trockenlauf, dann ohne --dry-run:
-immich-go upload from-folder \
-  --server=http://10.10.10.1:2283 \
-  --api-key=<PERSONEN_KEY> --admin-api-key=<ADMIN_KEY> \
-  --pause-immich-jobs=false \
-  --concurrent-tasks=4 --on-errors=continue --session-tag \
-  --exclude-extensions=.cr2,.CR2,.arw,.nef,.dng,.lrcat \
-  --dry-run \
-  "/Volumes/Data/Pictures/<Person>_Pics"
-
-# 3. Danach ML wieder resumen (erst Metadaten/Thumbnails leerlaufen lassen).
-```
-
-- `--on-errors=continue` **zwingend** — Default `stop` bricht beim ersten Timeout komplett ab.
-- `--pause-immich-jobs=false`, weil die ML manuell gesteuert wird (sonst gibt immich-go am Ende
-  *alle* Queues frei, auch die manuell pausierten).
-- immich-go ist resumierbar (Hash-Dedup) — nach Abbruch einfach nochmal.
-- `--exclude-extensions` filtert RAW. immich-go zieht (anders als die alte Immich-CLI) keine
-  `*.files/`-Thumbnail-Ordner mit. Trotzdem nach dem Import **Papierkorb / Duplikate prüfen**.
-- Läuft ein Personen-Import parallel zu einem anderen Import auf **dasselbe Konto**? Nicht machen
-  (doppeltes Hashing, Album-/Dedup-Logik kollidiert) — nacheinander.
-
-### Fallback: Immich-CLI-Container mit NAS-Mount in der Colima-VM
-
-Wenn der Studio nicht verfügbar ist. Langsamer, NAS-über-VM-CIFS ist fragiler.
-
-1. **NAS in der Colima-VM mounten** (die NAS kann nur SMB 2.0, Umlaute brauchen `iocharset=utf8`
-   → einmalig `cifs-utils` + `linux-modules-extra-$(uname -r)` in der VM nachinstallieren):
-   ```bash
-   colima ssh -- sudo sh -c 'apt-get install -y cifs-utils linux-modules-extra-$(uname -r); modprobe nls_utf8; mkdir -p /mnt/andy_pics'
-   colima ssh -- sudo mount -t cifs "//192.168.178.38/Data/Pictures/Andy_Pics" /mnt/andy_pics \
-     -o username=andy,password=XXX,ro,vers=2.0,iocharset=utf8
-   ```
-2. **Import per immich-cli-Container** (im selben Docker-Netz wie Immich, kein Node auf dem Mac nötig):
-   ```bash
-   docker run --rm --network immich_default \
-     -e IMMICH_INSTANCE_URL=http://immich-server:2283/api \
-     -e IMMICH_API_KEY=<frischer_key> \
-     -v "/mnt/andy_pics:/import:ro" \
-     ghcr.io/immich-app/immich-cli:latest upload --recursive \
-       --ignore '**/*.files/**' \
-       --ignore '**/*.CR2' --ignore '**/*.cr2' \
-       --ignore '**/*.lrcat*' \
-       "/import/01_Pics/Ausflüge&Events/2003"
-   ```
-3. Nach dem Import **NAS wieder aushängen:** `colima ssh -- sudo umount /mnt/andy_pics`
-
-### ⚠️ `--ignore`-Filter nicht vergessen
-
-Die Immich-CLI hat **keinen** persistenten Filter — die `--ignore`-Patterns müssen bei
-**jedem** Aufruf mitgegeben werden. Ohne sie landet Müll in Immich:
-
-| Pattern | fängt weg |
-|---|---|
-| `**/*.files/**` | `Foo.jpg.files/vcm_s_kf_*.jpg` — Thumbnails eines alten Windows-Bildbetrachters (2 pro Originalfoto!) |
-| `**/*.CR2` `**/*.cr2` | Canon-RAWs (~35 GB, sollen nicht mit) |
-| `**/*.lrcat*` | Lightroom-Kataloge |
-
-`.DS_Store`, `._*`, `Thumbs.db`, `*.db`, `*.ini` ignoriert die CLI von sich aus.
-
-**Beim ersten POC-Import (Ordner 1992–2002) fehlte der Filter** → 275 `vcm_s_kf_*`-Thumbnails
-mussten nachträglich per API (Suche nach `originalFileName` Präfix `vcm_s_kf`) in den Papierkorb
-verschoben werden. Also: nach jedem Import einmal **Papierkorb / Duplikate in Immich prüfen**.
-
-### API-Key
-
-Für die CLI einen API-Key anlegen (Immich → Profilbild → *Konto-Einstellungen* → *API-Schlüssel*),
-nach der Migration wieder löschen. Nicht ins Repo committen.
-
-Die aktuell aktiven Import-Keys (andy/Admin, Lilly, Steffi) liegen in
-**`import-api-keys.local.md`** – gitignored, nicht in Git. Nach Abschluss aller Importe
-dort löschen und in Immich widerrufen.
-
----
-
-## Google Photos / Takeout-Import
-
-Google-Takeout-Archive **mit Alben** importieren. Die normale Immich-CLI kann keine
-Takeout-Alben → **[`immich-go`](https://github.com/simulot/immich-go)** (v0.32): liest die ZIPs
-direkt, wertet die `.json`-Sidecars aus (Datum, GPS, Beschreibung, Favorit, archiviert), baut
-die **benannten Alben** nach, stapelt Live/Motion Photos.
-
-**Immer ins Konto des `--api-key`-Besitzers** — jeder Nutzer braucht einen eigenen Key aus
-seinem Konto (Keys: `import-api-keys.local.md`). `--admin-api-key` bleibt andys Admin-Key.
-
-**Status (alle 2026-08-31):**
-
-| Konto | vorher | nachher | Alben |
-|---|---|---|---|
-| andy | 5.265 | 55.338 | 4 → 317 |
-| Lilly | 10.513 | 14.023 | — |
-| Steffi | läuft | — | — |
-
-### Regeln
-
-- **Alle ZIPs eines Takeouts zusammen** in einem Aufruf — Google verteilt Fotos und Alben quer
-  über die Archive. Einzeln = unvollständige Alben.
-- ZIPs **nicht entpacken**. Auf dem Mac Studio unter `~/Downloads/` lassen, Glob auf den
-  Takeout-Zeitstempel: `~/Downloads/takeout-<TS>-*.zip` (matcht nur diesen einen Takeout).
-- Erst `--dry-run` (zeigt Alben-/Fotozahl), dann echt.
-- **Reihenfolge:** erst Google-Takeout (bringt Alben), dann NAS-Rest, dann Duplikat-Ansicht.
-- Nicht zwei Importe gleichzeitig auf **dasselbe Konto**.
-
-### ⚠️ Lehren aus dem 1. Lauf (kostete Stunden)
-
-1. **`--admin-api-key` zwingend mitgeben.** `--pause-immich-jobs` ist zwar Default-`true`, greift
-   aber nur mit einem *separaten* Admin-Key (kann derselbe sein, wenn der User Admin ist). Ohne
-   ihn laufen 24 parallele Uploads (`--concurrent-tasks` Default!) ungebremst → die VM
-   kollabiert (Load 17, Server-Timeouts), nur ~40 % kommen an, Rest „pending".
-2. **`--concurrent-tasks=6`** — der Flaschenhals ist Immichs Ingest, nicht das Netz.
-3. immich-go ist **resumierbar** (Hash-Dedup) — nach Abbruch einfach nochmal mit obigen Flags.
-4. immich-go gibt am Ende **alle** Job-Queues frei — auch manuell pausierte. Nach „Upload
-   completed" die ML-Queues sofort wieder pausieren (s.u.).
-
-### Ablauf
-
-Läuft am schnellsten **vom Mac Studio über eine Thunderbolt-Bridge** (beide Macs sonst im WLAN;
-mini per TB-IP `http://10.10.10.1:2283` erreichbar). immich-go ist ein einzelnes Binary
-(`brew install immich-go` oder Release von GitHub, `Darwin_arm64`).
-
-```bash
-# Trockenlauf
-immich-go upload from-google-photos \
-  --server=http://10.10.10.1:2283 --api-key=<KEY> --dry-run \
-  takeout-*.zip
-
-# Echt
-immich-go upload from-google-photos \
-  --server=http://10.10.10.1:2283 \
-  --api-key=<KEY> --admin-api-key=<ADMIN_KEY> \
-  --concurrent-tasks=6 --session-tag \
-  takeout-*.zip
-```
-
-### Server vorbereiten (bei großen Importen)
-
-- **Colima temporär hochdrehen** — steht in `start-colima.sh` auf `--cpu 8 --memory 12` (M4 mini
-  hat 10 Kerne / 16 GB). Job-Concurrency in Immich (*Administration → Einstellungen → Aufträge*)
-  auf metadata 10 / thumbnail 6.
-- **ML-Queues pausieren** während des Imports (der Python-ML-Prozess ist der größte CPU-Fresser):
-  ```bash
-  for q in smartSearch faceDetection facialRecognition ocr duplicateDetection; do
-    curl -s -X PUT "http://localhost:2283/api/jobs/$q" -H "x-api-key: <KEY>" \
-      -H 'content-type: application/json' -d '{"command":"pause"}'
-  done
-  ```
-  Nach dem Import: erst Metadaten+Thumbnails leerlaufen lassen, dann dieselben Queues mit
-  `{"command":"resume"}` — Gesichter/CLIP-Suche/OCR brauchen für ~68k Fotos 6–12 h.
-
-**Nicht mitkommt:** Googles Gesichtsgruppen (Immich macht eigene), Freigaben.
-
-### ⚠️ Takeout enthält keine mit dir geteilten Fremdfotos
-
-Takeout exportiert **nur Fotos, die dir gehören** (selbst hochgeladen). Bilder, die andere mit
-dir geteilt haben — auch wenn du sie in **deine eigenen Alben** gelegt hast — bleiben im Konto
-des Uploaders und fehlen im Takeout. Bei andys Import betraf das ~30–40 Alben (teils viele
-Fotos pro Album).
-
-**Nacharbeit (album-weise, erhält die Gruppierung):**
-
-1. Zuerst prüfen: 2–3 betroffene Alben in Immich vs. Google Fotos vergleichen — nur wenige
-   Fehlende = Kosmetik, fast leere Alben = Aufwand lohnt.
-2. Google Fotos (Web) → Album öffnen → `⋯` → *Alle herunterladen* → ZIP je Album. Alle unter
-   **einen** Elternordner entpacken, **Ordnername = Albumname**:
-   `~/Downloads/gphotos-shared/<Albumname>/…`
-3. **Ein** immich-go-Lauf über den Elternordner (dedupt per Hash, gefahrlos wiederholbar,
-   nur die fehlenden Fremdfotos landen im jeweiligen Album):
-   ```bash
-   immich-go upload from-folder \
-     --server=http://10.10.10.1:2283 \
-     --api-key=<ANDY_KEY> --admin-api-key=<ANDY_KEY> \
-     --pause-immich-jobs=false --concurrent-tasks=4 --on-errors=continue \
-     --folder-as-album=folder --session-tag \
-     ~/Downloads/gphotos-shared/
-   ```
-4. Erst machen, wenn kein ML-Durchlauf läuft (keine zusätzliche Upload-Last).
-
-Zu viel Klickerei bei 40 Alben? `gphotos-cdp` (steuert Chrome per DevTools-Protokoll, lädt auch
-geteilte Inhalte) — ein Durchlauf statt 40, dafür fummeliger Setup.
-
-**Familien-Alternative:** Steffi/Lilly haben ihre Fotos schon in ihren eigenen Immich-Konten →
-in Immich ein **gemeinsames Album** anlegen statt die Fotos zu duplizieren.
+API-Keys für CLI-Importe: Immich → Profilbild → *Konto-Einstellungen* → *API-Schlüssel*, nach
+Gebrauch wieder löschen, nicht ins Repo committen.
 
 ---
 
@@ -281,23 +88,11 @@ in Immich ein **gemeinsames Album** anlegen statt die Fotos zu duplizieren.
 
 ## Offene Punkte / TODO
 
-- [x] **Docker-Compose-Autostart** nach Reboot — LaunchAgent `local.immich.plist` + `start-immich.sh`
-- [x] **Storage Template + Datenportabilität** — Template `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}` aktiv, Bestand migriert
-- [x] **Library auf externe SSD** umgezogen (2026-08-31) — `/Volumes/ServerData/pictures`, siehe [Externe Platte](#externe-platte-für-die-library)
-- [x] **NAS-Bestands-Migration andy** (2026-08-31) — `01_Pics` komplett per immich-go `from-folder`, ~55k → 67k Assets (RAW ausgeschlossen)
-- [x] **NAS-Bestands-Migration Steffi** (2026-08-31) — `Steffi_Pics`
-- [x] **NAS-Bestands-Migration Lilly** — `Lilly_Pics` (analog, Lillys Key). Ablauf siehe [Fotos importieren](#fotos-importieren-bestands-migration)
-- [x] **Google-Takeout-Import andy** (2026-08-31) — 5.265 → 55.338 Assets, 317 Alben. Siehe [Google Photos / Takeout](#google-photos--takeout-import)
-- [x] **Google-Takeout-Import Lilly** (2026-08-31) — 10.513 → 14.023 Assets
-- [x] **Google-Takeout-Import Steffi** (2026-08-31) — ~9,7k → 39,5k Assets
-- [x] **ML-Voll-Durchlauf** nach allen Importen (2026-09-01) — 121.935 Assets, 144.968 Gesichter, 5.140 Personen-Cluster; Job-Concurrency danach auf Normalwerte zurück
-- [x] **Colima zurückgedreht** (2026-09-01) — 8 CPU/12 GB → 6 CPU/8 GB (12 GB ließ macOS thrashen, Compressor ~7,7 GB), `start-colima.sh` + `colima.yaml`
-- [x] **Geteilte Fremdfotos nachholen** — ~30–40 andy-Alben, in denen Takeout die mit ihm geteilten Bilder Dritter ausgelassen hat. Album-weiser Download + immich-go, siehe [Takeout enthält keine Fremdfotos](#️-takeout-enthält-keine-mit-dir-geteilten-fremdfotos)
-- [x] **Duplikat-Ansicht** durchgehen (Google-Neukomprimierung vs. NAS-Original). ⚠️ Beim Löschen eines Duplikats übernimmt Immich die **Album-Zuordnung des gelöschten Assets nicht** aufs behaltene — vorher Alben notieren.
-- [x] **Personen benennen** (Personen-Ansicht) — 5.140 Cluster, erst 29 benannt
+Erledigt (Autostart, Storage Template, externe SSD, Bestands-Migration aller drei Konten,
+ML-Durchlauf, rsync-/DB-Backups, Personen-Benennung): siehe Abschnitte oben bzw.
+[`import-notes.md`](import-notes.md) und Git-Historie. Noch offen:
+
 - [ ] **Import-Keys widerrufen** + `import-api-keys.local.md` leeren
-- [x] **rsync-Backup auf die NAS** einrichten — Library (`/Volumes/ServerData/pictures/library/`) + DB-Dumps (`…/backups/`) regelmäßig per `rsync` auf die NAS spiegeln (bisher liegt alles nur auf der einen externen SSD).
-- [x] **DB-Backups auf anderes Medium** — die nächtlichen Dumps liegen unter `pictures/backups/` auf **derselben** externen Platte wie die Library. Für echten Schutz woanders hin kopieren (interne SSD / NAS / Cloud) — deckt der rsync-Punkt oben mit ab.
 - [ ] **Öffentlicher Zugang** (Zugriff von unterwegs ohne WireGuard, z.B. für Mobile-Auto-Backup) — nginx-Reverse-Proxy + Let's Encrypt + FRITZ!Box-Portfreigabe + DynDNS. Kein DS-Lite vorhanden, FRITZ!Box kann DynDNS → machbar. Schritt für Schritt siehe [Öffentlicher Zugang (geplant)](#öffentlicher-zugang-geplant)
 
 ---
@@ -516,29 +311,11 @@ Immich ist damit „Betrachter/Organisierer", kein Datensilo.
 
 ### ✅ Behoben mit v3.3.0 (2026-10-09): Speicheranzeige zeigte „57,1 TiB" statt ~229 GiB
 
-Immichs „Storage Calculation Fix" in v3.3.0 behebt das Problem — `GET /api/server/storage`
-zeigt seitdem die korrekten Absolutwerte (verifiziert nach dem Update: `diskSize 1.8 TiB`,
-`diskUse 791.4 GiB`, deckt sich exakt mit `df -h`). Rest dieses Abschnitts als Referenz,
-falls es nach einem künftigen Update doch wieder auftaucht:
-
-Das Dashboard (*Administration → Server-Statistik*) und `GET /api/server/storage` meldeten
-absurde Absolutwerte (z.B. `diskSize 57,1 TiB`, `diskUse 29,2 TiB` bei einer 256-GB-SSD).
-
-**Ursache:** Colima mountet den Host-Ordner per `virtiofs` in die VM. virtiofs meldet
-`statvfs()` mit `f_bsize = 1 MiB`, während die Blockzahlen in `f_frsize = 4 KiB` gezählt
-sind. Immich (bzw. Node.js `fs.statfs`, das nur `bsize` kennt, kein `frsize`) rechnet
-`Blöcke × bsize` → **Faktor 256 zu groß** (229 GiB × 256 ≈ 57 TiB).
-
-**Auswirkung: keine.**
-- `diskUsagePercentage` in der API ist **korrekt** (~51 %), nur die Absolutwerte sind Müll
-- `df -h` im Container zeigt richtig (`229G / 117G used`)
-- Uploads, Quotas (falls je gesetzt — Quotas laufen gegen real getrackte Bytes) unberührt
-
-**Workaround** (nicht mehr nötig, nur als Referenz): Colima `mountType` auf `sshfs` oder `9p` stellen
-(`~/.colima/default/colima.yaml` + `colima restart`). **Nicht empfohlen** — virtiofs ist
-deutlich schneller, und ein Fotoserver mit vielen Thumbnail-I/Os würde das spüren. Die
-externe SSD später zeigt denselben Effekt (kommt ebenfalls per virtiofs über `/Volumes/…`
-in die VM, da `vz` kein USB-Passthrough kann).
+Ursache war ein virtiofs/Node.js-`statfs`-Rundungsfehler (Colima mountet per `virtiofs`,
+`f_bsize = 1 MiB` statt `f_frsize = 4 KiB` → Immich rechnete Blöcke × bsize, Faktor 256 zu groß).
+Reine Anzeige, keine Auswirkung auf Uploads/Quotas. Immichs „Storage Calculation Fix" in v3.3.0
+behebt es — `GET /api/server/storage` zeigt seitdem korrekte Werte (verifiziert: `diskSize 1.8 TiB`,
+`diskUse 791.4 GiB`, deckt sich mit `df -h`).
 
 ---
 
